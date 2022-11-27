@@ -1,0 +1,2 @@
+min interest distance: 5293.411727
+cost: 328900
