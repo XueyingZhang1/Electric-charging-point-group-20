@@ -1,0 +1,193 @@
+model electric_charging_point
+
+uses "mmxprs"
+uses "mmsheet"
+
+declarations
+number_of_year = 4
+year = 0..number_of_year
+year14 = 1..number_of_year
+
+number_of_charing_type = 3
+charing_type = 1..number_of_charing_type
+charing_type_name: array(charing_type) of string
+
+no_centre_point = 185
+centre_point = 1..no_centre_point
+no_sub_point = 162
+sub_point = 1..no_sub_point
+
+no_potential_point = 304
+potential_point = 1..no_potential_point
+current_point = 305..347                    !potential 304, current 43
+
+no_total_point = 347
+total_point = 1..no_total_point
+
+no_total_demand = 103
+total_demand = 1..no_total_demand
+
+
+
+M,set_up_cost,station_cost_slow,station_cost_fast,station_cost_rapid,use_rate_slow,use_rate_fast,
+use_rate_rapid,capacity_slow,capacity_fast,capacity_rapid: real
+distance_p_i: array(total_point) of real
+distance_bet_points: array(total_point,total_point) of real
+dem_point_bi: array(total_point,total_demand) of real
+demand: array(total_demand,year14) of real
+current_stations: array(current_point,charing_type) of real
+
+point_bi, point_slow, point_fast, point_rapid, point_total,
+point_bi_eachyear, point_slow_eachyear, point_fast_eachyear,
+point_rapid_eachyear: array(total_point,year) of mpvar
+point_point_bi: array(total_point,total_point,year) of mpvar
+energy_deliver: array(total_point,total_demand,year14) of mpvar
+
+cost, interest_distance: mpvar
+
+end-declarations
+
+initialisations from "final_data"
+  M set_up_cost station_cost_slow station_cost_fast station_cost_rapid use_rate_slow use_rate_fast
+  use_rate_rapid capacity_slow capacity_fast capacity_rapid charing_type_name
+end-initialisations
+
+initializations from "mmsheet.csv: Distance_D_and_P_bi.csv"
+dem_point_bi as "noindex;[B2:MJ348]"
+end-initializations
+
+initializations from "mmsheet.csv: Distance_between_points.csv"
+distance_bet_points as "noindex;[B2:MJ348]"
+end-initializations
+
+initializations from "mmsheet.csv: new_data.csv"
+demand as "noindex;[L2:O104]"
+end-initializations
+
+initializations from "mmsheet.csv: Current_point.csv"
+current_stations as "noindex;[E2:G44]"
+end-initializations
+
+initializations from "mmsheet.csv: Distance_I_and_P_min.csv"
+distance_p_i as "noindex;[B2:B348]"
+end-initializations
+
+
+
+
+! Objective: to minimise cost
+obj := cost  !interest_distance
+
+! Define 2 objectives to be minimised
+cost = (sum(p in total_point) point_bi(p,4) - 43) * set_up_cost +
+       (sum(p in total_point) point_slow(p,4) - 47) * station_cost_slow +
+       (sum(p in total_point) point_fast(p,4) - 18) * station_cost_fast +
+       (sum(p in total_point) point_rapid(p,4) - 13) * station_cost_rapid
+
+interest_distance = sum(p in total_point) point_bi(p,4)*distance_p_i(p)
+
+! Interest distance constraint
+!interest_distance <= 5300
+
+! Binary constraints
+forall (p in total_point, y in year) do
+  point_bi(p,y) is_binary
+  point_total(p,y) <= point_bi(p,y)*M
+end-do
+
+! Integer constraints
+forall (p in total_point, y in year) do
+  point_slow(p,y) is_integer
+  point_fast(p,y) is_integer
+  point_rapid(p,y) is_integer
+  point_bi_eachyear(p,y) is_integer
+  point_slow_eachyear(p,y) is_integer
+  point_fast_eachyear(p,y) is_integer
+  point_rapid_eachyear(p,y) is_integer
+end-do
+
+! Increase constraints
+forall (p in total_point, y in year14) do
+  point_bi_eachyear(p,y) = point_bi(p,y) - point_bi(p,y-1)
+  point_slow_eachyear(p,y) = point_slow(p,y) - point_slow(p,y-1)
+  point_fast_eachyear(p,y) = point_fast(p,y) - point_fast(p,y-1)
+  point_rapid_eachyear(p,y) = point_rapid(p,y) - point_rapid(p,y-1)
+end-do
+
+! Point binary matrix
+forall (p1 in total_point, p2 in total_point, y in year | p1 < p2) do
+  point_point_bi(p1,p2,y) is_binary
+  point_bi(p1,y) + point_bi(p2,y) - 1 <= point_point_bi(p1,p2,y)*M
+end-do
+
+! Define point_total
+forall (p in total_point, y in year) do
+  point_total(p,y) = point_slow(p,y) + point_fast(p,y) + point_rapid(p,y)
+end-do
+
+! Density constraint
+forall (p1 in total_point, p2 in total_point, y in year | p1 < p2) do
+  distance_bet_points(p1,p2) -20 -5*(point_total(p1,y)+point_total(p2,y)) >= -M*(1-point_point_bi(p1,p2,y))
+end-do
+
+! Energy deliver constraint, if not in distance, then can not deliver energy
+forall (p in total_point, d in total_demand, y in year14) do
+  energy_deliver(p,d,y) <= dem_point_bi(p,d)*M
+end-do
+
+! Capacity = sum of energy delivered
+forall (p in total_point, y in year14) do
+  point_slow(p,y)*capacity_slow*use_rate_slow + point_fast(p,y)*capacity_fast*use_rate_fast +
+  point_rapid(p,y)*capacity_rapid*use_rate_rapid >= sum(d in total_demand) energy_deliver(p,d,y)
+end-do
+
+! Meet demand
+forall (d in total_demand, y in year14) do
+  sum(p in total_point) energy_deliver(p,d,y) >= demand(d,y)*0.8
+end-do
+
+! Max number of stations limit for each point
+forall (p in total_point, y in year) do
+  point_total(p,y) <= 10
+end-do
+
+! Make sure the number of rapid stations for each point for each year
+forall(p in total_point, y in year14) do
+  point_rapid_eachyear(p,y) <= (point_slow_eachyear(p,y) + point_fast_eachyear(p,y))*0.5
+end-do
+
+
+! Define current points & stations
+forall (c in current_point) do
+  point_bi(c,0) = 1
+  point_bi_eachyear(c,0) = 1
+  point_slow(c,0) = current_stations(c,1)
+  point_slow_eachyear(c,0) = current_stations(c,1)
+  point_fast(c,0) = current_stations(c,2)
+  point_fast_eachyear(c,0) = current_stations(c,2)
+  point_rapid(c,0) = current_stations(c,3)
+  point_rapid_eachyear(c,0) = current_stations(c,3)
+end-do
+
+forall (p in potential_point) do
+  point_bi(p,0) = 0
+  point_bi_eachyear(p,0) = 0
+  point_slow(p,0) = 0
+  point_slow_eachyear(p,0) = 0
+  point_fast(p,0) = 0
+  point_fast_eachyear(p,0) = 0
+  point_rapid(p,0) = 0
+  point_rapid_eachyear(p,0) = 0
+end-do
+
+
+
+minimise(obj)
+
+writeln
+writeln("cost: ",getsol(cost))
+writeln
+writeln("interest distance: ",getsol(interest_distance))
+
+
+end-model
