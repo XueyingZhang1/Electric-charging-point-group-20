@@ -1,0 +1,12 @@
+M: 999999
+set_up_cost: 5100
+station_cost_slow: 1600
+station_cost_fast: 2000
+station_cost_rapid: 2400
+use_rate_slow: 0.8
+use_rate_fast: 0.8
+use_rate_rapid: 0.8
+capacity_slow: 3000
+capacity_fast: 5000
+capacity_rapid: 50000
+charing_type_name: ["slow" "fast" "rapid"]
